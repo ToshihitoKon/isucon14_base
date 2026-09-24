@@ -94,24 +94,23 @@ Ansible の base ロール相当のカーネルパラメータ（`ip_local_port_
 
 ```sh
 $ cd development
-# フロントエンドのビルド（bench/benchrun/frontend_*.json も更新される）
+# フロントエンドのビルド
 $ docker compose -f compose-go.yml run --rm frontend
 # アプリケーション（nginx, webapp, MySQL, matcher, payment_mock）の起動
 $ docker compose -f compose-go.yml up -d --build
 # 負荷走行（ベンチマーカーは webapp から http://bench:12345 で決済サーバーとして参照されるため --use-aliases が必要）
 $ docker compose -f compose-go.yml run --rm --build --use-aliases bench
 # 負荷走行のオプションを変える場合
-$ docker compose -f compose-go.yml run --rm --use-aliases bench run --target http://nginx --payment-url http://bench:12345 -t 60
+$ docker compose -f compose-go.yml run --rm --use-aliases bench run --target http://nginx --payment-url http://bench:12345 -t 60 --skip-static-sanity-check
 # 停止（DB のデータも消す場合は -v を付ける）
 $ docker compose -f compose-go.yml down
 ```
 
 webapp のコードを変更した場合は `up -d --build` で再ビルドしてください。
 
-アプリケーション起動中にフロントエンドを再ビルドした場合は、以下の2点に注意してください。
+アプリケーション起動中にフロントエンドを再ビルドした場合は、`frontend/build/client` が作り直され nginx のマウントが外れるため、`docker compose -f compose-go.yml restart nginx` を実行してください（静的ファイルが 500 になります）。
 
-- ビルドで `frontend/build/client` が作り直され nginx のマウントが外れるため、`docker compose -f compose-go.yml restart nginx` を実行してください（静的ファイルが 500 になります）
-- 静的ファイルのハッシュがベンチマーカーに埋め込まれるため、`bench` も `--build` 付きで実行してください
+ベンチマーカーは既定で静的ファイルのチェック（`--skip-static-sanity-check`）をスキップします。フロントエンドのビルド結果とベンチマーカーに埋め込まれたハッシュの不一致で失敗しなくなる代わりに、負荷走行中の静的ファイル取得も行われないため、競技環境より nginx の負荷が軽くなります。
 
 ## docker compose での環境構築（Go/Perl言語のみ、ホスト上で実行）
 

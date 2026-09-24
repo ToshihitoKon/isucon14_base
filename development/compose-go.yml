@@ -80,8 +80,7 @@ services:
       - nginx
 
   # フロントエンドのビルド: `docker compose -f compose-go.yml run --rm frontend`
-  # frontend/build/client に成果物を出力し、bench/benchrun/frontend_*.json (静的ファイルのハッシュ) を更新する
-  # ハッシュはベンチマーカーのビルド時に埋め込まれるため、フロントエンドを変更したら bench も再ビルドすること
+  # frontend/build/client に成果物を出力する (vite の設定により bench/benchrun/frontend_*.json も更新される)
   frontend:
     image: node:20
     profiles:
