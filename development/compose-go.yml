@@ -12,7 +12,7 @@ x-tuning: &tuning
 services:
   nginx:
     <<: *tuning
-    image: public.ecr.aws/docker/library/nginx:latest
+    image: nginx:latest
     container_name: nginx
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
@@ -50,7 +50,7 @@ services:
     depends_on:
       - webapp
   db:
-    image: public.ecr.aws/docker/library/mysql:8
+    image: mysql:8
     environment:
       ENV: local-dev
       MYSQL_ROOT_PASSWORD: isucon
