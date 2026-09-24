@@ -1,0 +1,22 @@
+# ローカル実行用のベンチマーカー
+# bench/Dockerfile は競技運営の ECS/supervisor 前提のため、こちらを使う
+# 静的ファイルのハッシュ(bench/benchrun/frontend_*.json)は frontend のビルド時に生成されるため、
+# frontend をビルドしてからこのイメージをビルドすること
+FROM golang:1.23 AS builder
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o /app/bench -ldflags "-s -w" -trimpath .
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install --no-install-recommends -y \
+  ca-certificates \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/bench /usr/local/bin/bench
+ENTRYPOINT ["/usr/local/bin/bench"]
+CMD ["run", "--target", "http://nginx", "--payment-url", "http://bench:12345", "-t", "60"]
