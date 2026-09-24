@@ -1,9 +1,5 @@
 import { vitePlugin as remix } from "@remix-run/dev";
-import { createHash } from "crypto";
-import { fdir } from "fdir";
 import { existsSync, readFileSync, writeFileSync } from "fs";
-import { readFile, writeFile } from "fs/promises";
-import path, { join } from "path";
 import { defineConfig, type Plugin, type UserConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 import {
@@ -115,126 +111,6 @@ const customConsolePlugin: Plugin = {
   },
 };
 
-const generateHashesFile = (): Plugin => {
-  const clientOutputDirectory = path.resolve(__dirname, "./build/client");
-  const benchRoot = path.resolve(__dirname, "../bench");
-
-  type RouteInformation = {
-    css: string[];
-    imports: string[];
-    module: string;
-    parentId?: string;
-    path?: string;
-  };
-  const getAllFilesFromSingleRoute = (route: RouteInformation) => [
-    route.module,
-    ...route.imports,
-    ...route.css,
-  ];
-  const getAllFilesFromRouteIncludingAncestors = (
-    route: RouteInformation,
-    manifestRoutes: Record<string, RouteInformation>,
-  ): string[] => [
-    ...getAllFilesFromSingleRoute(route),
-    ...(route.parentId
-      ? getAllFilesFromRouteIncludingAncestors(
-          manifestRoutes[route.parentId],
-          manifestRoutes,
-        )
-      : []),
-  ];
-  const unique = <T>(arr: T[]) => [...new Set(arr)];
-
-  return {
-    name: "generate-hashes-file",
-    apply(_config, { isSsrBuild }) {
-      return !!isSsrBuild;
-    },
-    enforce: "post",
-    writeBundle: {
-      order: "post",
-      sequential: true,
-      handler: async () => {
-        const files = await new fdir()
-          .withRelativePaths()
-          .crawl(clientOutputDirectory)
-          .withPromise();
-        const hashes = await Promise.all(
-          files
-            .filter((file) => file !== ".vite/manifest.json")
-            .map(async (file) => {
-              const hash = createHash("md5");
-              hash.update(await readFile(join(clientOutputDirectory, file)));
-              return [file, hash.digest("hex")];
-            }),
-        );
-        await writeFile(
-          join(benchRoot, "./benchrun/frontend_hashes.json"),
-          JSON.stringify(Object.fromEntries(hashes)),
-        );
-
-        const manifestFileName = files.find((file) =>
-          file.startsWith("assets/manifest-"),
-        );
-        if (!manifestFileName) throw new Error("manifest file not found");
-        const manifestFile = await readFile(
-          join(clientOutputDirectory, manifestFileName),
-          "utf8",
-        );
-        if (!manifestFile.includes("window.__remixManifest"))
-          throw new Error("different manifest file found");
-
-        const manifestFileContent = (0, eval)(
-          "Object.assign(" +
-            manifestFile
-              .replace(/^window\.__remixManifest=/, "")
-              .replace(/;$/, "") +
-            ")",
-        ) as {
-          entry: RouteInformation;
-          routes: Record<string, RouteInformation>;
-        };
-        const favicons = files
-          .filter(
-            (file) => file === "favicon.ico" || file === "favicon-32x32.png",
-          )
-          .map((f) => `/${f}`);
-        const assetsForMap = files
-          .filter(
-            (file) =>
-              file.startsWith("images/buildings") ||
-              file.startsWith("images/house") ||
-              file.startsWith("images/town"),
-          )
-          .map((f) => `/${f}`);
-        const modulesForEachPath = Object.fromEntries(
-          Object.values(manifestFileContent.routes)
-            .filter((route) => "path" in route)
-            .map(
-              (route) =>
-                [
-                  "/" + route.path!,
-                  unique([
-                    ...getAllFilesFromSingleRoute(manifestFileContent.entry),
-                    ...getAllFilesFromRouteIncludingAncestors(
-                      route,
-                      manifestFileContent.routes,
-                    ),
-                    ...favicons,
-                    ...(route.path === "client" ? assetsForMap : []),
-                  ]),
-                ] as [string, string[]],
-            ),
-        );
-        await writeFile(
-          join(benchRoot, "./benchrun/frontend_files.json"),
-          JSON.stringify(modulesForEachPath),
-        );
-      },
-    },
-  };
-};
-
 export const config = {
   plugins: [
     remix({
@@ -247,7 +123,6 @@ export const config = {
     }),
     tsconfigPaths(),
     customConsolePlugin,
-    generateHashesFile(),
   ],
   define: {
     [alternativeURLExpression]: `"${process.env["API_BASE_URL"] ?? "."}"`,

@@ -80,7 +80,7 @@ services:
       - nginx
 
   # フロントエンドのビルド: `docker compose -f compose-go.yml run --rm frontend`
-  # frontend/build/client に成果物を出力する (vite の設定により bench/benchrun/frontend_*.json も更新される)
+  # frontend/build/client に成果物を出力する
   frontend:
     image: node:20
     profiles:
