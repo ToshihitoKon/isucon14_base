@@ -1,6 +1,18 @@
+# provisioning/ansible/roles/base 相当のカーネルパラメータ・リソース制限
+# コンテナはネットワーク名前空間が分かれていてホストの設定を引き継がないため、個別に指定する
+# (コンテナ間通信はループバックではないので tcp_tw_reuse も明示的に有効化する)
+x-tuning: &tuning
+  sysctls:
+    net.ipv4.ip_local_port_range: "10000 65535"
+    net.ipv4.tcp_tw_reuse: 1
+  ulimits:
+    nofile: 655360
+    nproc: 655360
+
 services:
   nginx:
-    image: public.ecr.aws/docker/library/nginx:latest
+    <<: *tuning
+    image: nginx:latest
     container_name: nginx
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
@@ -10,6 +22,7 @@ services:
     depends_on:
       - webapp
   webapp:
+    <<: *tuning
     build:
       context: ../webapp/go
       dockerfile: ../../development/dockerfiles/Dockerfile.go
@@ -26,8 +39,18 @@ services:
       ISUCON_DB_HOST: db
     extra_hosts:
       - "host.docker.internal:host-gateway"
+  # 競技環境と同様に webapp から localhost:12345 で到達できるよう、webapp のネットワークを共有する
+  # (settings.payment_gateway_url の初期値が http://localhost:12345 のため)
+  # ベンチマーク実行時はベンチマーカー自身が決済サーバーになるため使われない
+  payment_mock:
+    build:
+      context: ../webapp/payment_mock
+    image: payment-mock
+    network_mode: service:webapp
+    depends_on:
+      - webapp
   db:
-    image: public.ecr.aws/docker/library/mysql:8
+    image: mysql:8
     environment:
       ENV: local-dev
       MYSQL_ROOT_PASSWORD: isucon
@@ -35,7 +58,7 @@ services:
     ports:
       - 3306:3306
     volumes:
-      - ./mysql/db:/var/lib/mysql
+      - mysql:/var/lib/mysql
       - ../webapp/sql:/docker-entrypoint-initdb.d
     healthcheck:
       test: mysqladmin ping -h 127.0.0.1 -uisucon -pisucon
@@ -43,3 +66,44 @@ services:
   matcher:
     image: mirror.gcr.io/curlimages/curl:latest
     command: /bin/sh -c "while true; do curl -s http://nginx/api/internal/matching; sleep 0.5; done"
+  # ベンチマーカー: `docker compose -f compose-go.yml run --rm --use-aliases bench` で実行する
+  # webapp からは http://bench:12345 で決済サーバーに到達するため --use-aliases が必要
+  bench:
+    <<: *tuning
+    build:
+      context: ../bench
+      dockerfile: ../development/dockerfiles/Dockerfile.bench
+    image: isucon14-bench-local
+    profiles:
+      - bench
+    depends_on:
+      - nginx
+
+  # フロントエンドのビルド: `docker compose -f compose-go.yml run --rm frontend`
+  # frontend/build/client に成果物を出力する
+  frontend:
+    image: node:20
+    profiles:
+      - build
+    user: "${UID:-1000}:${GID:-1000}"
+    working_dir: /work/frontend
+    environment:
+      HOME: /tmp
+      COREPACK_HOME: /tmp/corepack
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
+      npm_config_store_dir: /tmp/pnpm-store
+    volumes:
+      - ..:/work
+    command:
+      - sh
+      - -euc
+      - |
+        mkdir -p /tmp/bin
+        corepack enable --install-directory /tmp/bin
+        export PATH=/tmp/bin:$$PATH
+        corepack prepare pnpm@9 --activate
+        pnpm install --frozen-lockfile
+        pnpm run build
+
+volumes:
+  mysql:
